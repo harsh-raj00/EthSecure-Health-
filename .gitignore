@@ -35,3 +35,6 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Faculty Docs (Ignored intentionally)
+docs/Faculty_Presentation.md
