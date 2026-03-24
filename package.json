@@ -1,0 +1,29 @@
+{
+  "name": "ethsecurehealth",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^4.0.6",
+    "@nomicfoundation/hardhat-toolbox": "^7.0.0",
+    "@openzeppelin/contracts": "^5.6.1",
+    "chai": "^6.2.2",
+    "ethers": "^6.16.0",
+    "ganache": "^7.9.2",
+    "hardhat": "^3.2.0"
+  },
+  "dependencies": {
+    "autoprefixer": "^10.4.27",
+    "axios": "^1.13.6",
+    "crypto-js": "^4.2.0",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.2"
+  },
+  "type": "module"
+}

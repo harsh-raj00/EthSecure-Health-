@@ -1,0 +1,13 @@
+{
+  "network": "localhost",
+  "contracts": {
+    "EthSecureHealthAccess": "0xe78A0F7E598Cc8b0Bb87894B0F60dD2a88d6a8Ab",
+    "EthSecureRecord": "0x5b1869D9A4C187F2EAa108f3062412ecf0526b24"
+  },
+  "roles": {
+    "admin": "0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1",
+    "doctor": "0xFFcf8FDEE72ac11b5c542428B35EEF5769C409f0",
+    "patient": "0x22d491Bde2303f2f43325b2108D26f1eAbA1e32b"
+  },
+  "deployedAt": "2026-03-24T16:34:00.958Z"
+}
