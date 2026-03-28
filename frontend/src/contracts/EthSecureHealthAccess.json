@@ -353,6 +353,20 @@
       "type": "function"
     },
     {
+      "inputs": [],
+      "name": "selfRegisterAsDoctor",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "selfRegisterAsPatient",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
       "inputs": [
         {
           "internalType": "bytes4",

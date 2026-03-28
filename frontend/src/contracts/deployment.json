@@ -7,7 +7,14 @@
   "roles": {
     "admin": "0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1",
     "doctor": "0xFFcf8FDEE72ac11b5c542428B35EEF5769C409f0",
-    "patient": "0x22d491Bde2303f2f43325b2108D26f1eAbA1e32b"
+    "patient": "0x22d491Bde2303f2f43325b2108D26f1eAbA1e32b",
+    "diagnostic": "0xE11BA2b4D45Eaed5996Cd0823791E0C93114882d"
   },
-  "deployedAt": "2026-03-24T16:34:00.958Z"
+  "demoData": {
+    "patientName": "John Doe (Demo)",
+    "patientAge": 30,
+    "bloodType": "O+",
+    "preloadedReports": 3
+  },
+  "deployedAt": "2026-03-28T14:26:05.231Z"
 }
