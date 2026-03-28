@@ -175,7 +175,7 @@ mkdir test
 
 ### `test/EthSecureHealth.test.js`
 
-**Purpose:** 12 automated test cases that verify every module works correctly.
+**Purpose:** 14 automated test cases that verify every module works correctly.
 
 **How it connects:**
 - Uses `ethers.getSigners()` to create 6 simulated wallets (owner, doctor, doctor2, diagnostic, patient, unauthorized)
@@ -357,7 +357,7 @@ EthSecureHealth/
 ├── scripts/
 │   └── deploy.js                     # Deployment (55 lines)
 ├── test/
-│   └── EthSecureHealth.test.js       # 12 test cases (140 lines)
+│   └── EthSecureHealth.test.js       # 14 test cases (160 lines)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx                   # Main UI (140 lines)
@@ -368,7 +368,8 @@ EthSecureHealth/
 │   └── postcss.config.js
 ├── docs/
 │   ├── Faculty_Presentation.md       # Faculty explanation guide
-│   └── Project_Recreation_Guide.md   # This file
+│   ├── Project_Recreation_Guide.md   # This file
+│   └── Project_Report.md             # Comprehensive project report
 ├── hardhat.config.js
 ├── package.json
 └── README.md

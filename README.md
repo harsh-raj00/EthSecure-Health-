@@ -186,7 +186,7 @@ Patient uploads MRI scan
 | Web3 Library | **ethers.js** | Frontend ↔ Ethereum smart contract communication |
 | Encryption | **crypto-js (AES-256)** | Client-side medical data encryption |
 | HTTP Client | **axios** | IPFS upload/download via Pinata REST API |
-| Testing | **Truffle / Hardhat + Chai** | Smart contract unit testing (12 test cases) |
+| Testing | **Hardhat + Chai** | Smart contract unit testing (14 test cases) |
 | Styling | **TailwindCSS** | Premium glassmorphism UI design |
 | Version Control | **Git** | Source code management |
 | Runtime | **Node.js** | JavaScript runtime environment |
@@ -203,7 +203,7 @@ EthSecureHealth/
 ├── scripts/
 │   └── deploy.js                    # Deployment script for both contracts
 ├── test/
-│   └── EthSecureHealth.test.js      # 12 automated test cases
+│   └── EthSecureHealth.test.js      # 14 automated test cases
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx                  # Main React application
@@ -214,7 +214,8 @@ EthSecureHealth/
 │   └── postcss.config.js            # PostCSS pipeline
 ├── docs/
 │   ├── Faculty_Presentation.md      # Detailed faculty explanation guide
-│   └── Project_Recreation_Guide.md  # Step-by-step recreation instructions
+│   ├── Project_Recreation_Guide.md  # Step-by-step recreation instructions
+│   └── Project_Report.md            # Comprehensive project report
 ├── hardhat.config.js                # Solidity compiler configuration
 └── package.json                     # Node.js dependencies
 ```
@@ -232,7 +233,7 @@ npm install
 # 2. Compile smart contracts
 npx hardhat compile
 
-# 3. Run test suite (12 tests)
+# 3. Run test suite (14 tests)
 npx hardhat test
 
 # 4. Deploy to local network
@@ -247,28 +248,18 @@ npm run dev
 
 ---
 
-## 🐙 Git & GitHub Setup
+## 🚀 Future Improvements
 
-To save your project, share it with faculty, or build a portfolio, push it to GitHub:
-
-```bash
-# 1. Initialize Git repository
-git init
-
-# 2. Add all files (the .gitignore will automatically skip node_modules/)
-git add .
-
-# 3. Commit your changes
-git commit -m "Initial commit: EthSecure Health complete project"
-
-# 4. Create a new repository on GitHub (do this in your browser)
-# 5. Link your local repo to GitHub
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPOSITORY_NAME.git
-
-# 6. Push the code
-git branch -M main
-git push -u origin main
-```
+| # | Improvement | Description |
+|---|-------------|-------------|
+| 1 | **Real IPFS Integration** | Connect Pinata API keys so `storage.js` uploads/downloads encrypted files in production |
+| 2 | **Multi-Hospital Support** | Allow multiple hospitals to register and manage their own doctors & diagnostic centers |
+| 3 | **Emergency Access Protocol** | Time-locked emergency access for unconscious or incapacitated patients |
+| 4 | **Notification System** | Email/push alerts when a doctor accesses records or new reports are uploaded |
+| 5 | **ZK-Proof Verification** | Zero-knowledge proofs for verifying medical credentials without revealing identity |
+| 6 | **Mainnet/Testnet Deployment** | Deploy to Sepolia or Polygon for real-world testing beyond local Ganache |
+| 7 | **Mobile App (React Native)** | Cross-platform mobile app for patients to manage health records on the go |
+| 8 | **AI-Powered Diagnostics** | Integrate ML models for preliminary diagnosis suggestions from uploaded reports |
 
 ---
 

@@ -60,6 +60,24 @@ contract EthSecureHealthAccess is AccessControl {
     }
 
     /**
+     * @notice Allows any wallet to self-register as a patient.
+     * @dev Used when connecting via MetaMask — no admin approval needed.
+     */
+    function selfRegisterAsPatient() external {
+        _grantRole(PATIENT_ROLE, msg.sender);
+        emit PatientAdded(msg.sender);
+    }
+
+    /**
+     * @notice Allows any wallet to self-register as a doctor.
+     * @dev Used when connecting via MetaMask — no admin approval needed.
+     */
+    function selfRegisterAsDoctor() external {
+        _grantRole(DOCTOR_ROLE, msg.sender);
+        emit DoctorAdded(msg.sender);
+    }
+
+    /**
      * @notice Checks whether a given address holds a specific role.
      * @param role The bytes32 role identifier.
      * @param account The address to check.
