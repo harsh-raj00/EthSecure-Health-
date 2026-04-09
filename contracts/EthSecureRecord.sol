@@ -105,7 +105,7 @@ contract EthSecureRecord {
             accessControl.hasRole(accessControl.PATIENT_ROLE(), msg.sender),
             "Caller is not a patient"
         );
-        require(!patients[msg.sender].isRegistered, "Already registered");
+        // require(!patients[msg.sender].isRegistered, "Already registered");
 
         patients[msg.sender] = Patient({
             ipfsHash: _ipfsHash,
@@ -182,6 +182,7 @@ contract EthSecureRecord {
         string memory _ipfsHash,
         string memory _reportType
     ) public onlyRegisteredPatient(_patient) {
+        bool isPatient = msg.sender == _patient;
         bool isDiagnostic = accessControl.hasRole(
             accessControl.DIAGNOSTIC_CENTER_ROLE(), msg.sender
         );
@@ -190,7 +191,7 @@ contract EthSecureRecord {
         ) && doctorAccess[_patient][msg.sender];
 
         require(
-            isDiagnostic || isAuthorizedDoctor,
+            isPatient || isDiagnostic || isAuthorizedDoctor,
             "Not authorized to add report for this patient"
         );
 

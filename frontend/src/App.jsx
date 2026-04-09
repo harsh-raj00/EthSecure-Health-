@@ -4,23 +4,39 @@ import './index.css';
 import deploymentData from './contracts/deployment.json';
 import AccessControlABI from './contracts/EthSecureHealthAccess.json';
 import SecureRecordABI from './contracts/EthSecureRecord.json';
+import { encryptAndUpload, retrieveAndDecrypt } from './ipfs/storage.js';
 
 // ─── Utility Helpers ───────────────────────────────────────
+const API = 'http://localhost:5000/api';
+
 const hashPassword = async (pw) => {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw));
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
-const saveProfile = (wallet, data) => localStorage.setItem(`esh_profile_${wallet.toLowerCase()}`, JSON.stringify(data));
-const loadProfile = (wallet) => { try { return JSON.parse(localStorage.getItem(`esh_profile_${wallet.toLowerCase()}`)); } catch { return null; } };
-const saveFile = (key, base64) => localStorage.setItem(`esh_file_${key}`, base64);
-const loadFile = (key) => localStorage.getItem(`esh_file_${key}`);
-const genCID = () => 'Qm' + Array.from(crypto.getRandomValues(new Uint8Array(22))).map(b => b.toString(36)).join('').substring(0, 34);
-const genUniqueID = (role) => {
-  const prefix = role === 'patient' ? 'PAT' : 'DOC';
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  const rand = Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b => chars[b % chars.length]).join('');
-  return `${prefix}-${rand}`;
+const api = async (path, options = {}) => {
+  const res = await fetch(`${API}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'API error');
+  return data;
+};
+
+const resolveUniqueIdToProfile = async (uid) => {
+  if (!uid) return null;
+  try {
+    const prof = await api(`/profile/uid/${encodeURIComponent(uid.trim())}`);
+    let addr;
+    try { addr = ethers.getAddress(prof.wallet); } catch { addr = prof.wallet; }
+    return { address: addr, ...prof };
+  } catch { return null; }
+};
+
+const loadProfileFromAPI = async (wallet) => {
+  try { return await api(`/profile/wallet/${wallet}`); } catch { return null; }
 };
 
 function App() {
@@ -52,18 +68,28 @@ function App() {
   const [myReports, setMyReports] = useState([]);
   const [authorizedDocs, setAuthorizedDocs] = useState([]);
   const [doctorAddr, setDoctorAddr] = useState('');
+  const [pendingRequests, setPendingRequests] = useState([]);
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadMeta, setUploadMeta] = useState({ doctorName: '', date: '', medication: '', notes: '' });
 
   // ─── Doctor Dashboard State ─────────────────────────────
-  const [searchPatientAddr, setSearchPatientAddr] = useState('');
+  const [searchPatientId, setSearchPatientId] = useState('');
   const [patientReports, setPatientReports] = useState([]);
   const [docReportFile, setDocReportFile] = useState(null);
-  const [docReportMeta, setDocReportMeta] = useState({ patientAddr: '', type: 'Blood Test', notes: '' });
+  const [docReportMeta, setDocReportMeta] = useState({ patientId: '', type: 'Blood Test', notes: '' });
 
   // ─── Show Status ────────────────────────────────────────
-  const flash = (msg, type = 'info') => setStatus({ msg, type });
+  const flash = (msg, type = 'info') => {
+    setStatus({ msg, type });
+    setTimeout(() => setStatus(prev => prev.msg === msg ? { msg: '', type: '' } : prev), 5000);
+  };
   const clearStatus = () => setStatus({ msg: '', type: '' });
+
+  // ─── Password Modal (replaces browser prompt) ───────────
+  const [pwModal, setPwModal] = useState({ open: false, title: '', resolve: null });
+  const askPassword = (title) => new Promise((resolve) => setPwModal({ open: true, title, resolve }));
+  const handlePwSubmit = (val) => { pwModal.resolve(val); setPwModal({ open: false, title: '', resolve: null }); };
+  const handlePwCancel = () => { pwModal.resolve(null); setPwModal({ open: false, title: '', resolve: null }); };
 
   // ─── MetaMask Connection ────────────────────────────────
   const connectMetaMask = async () => {
@@ -81,16 +107,9 @@ function App() {
       setProvider(prov); setSigner(sig); setAccount(addr);
       setAccessContract(access); setRecordContract(record);
 
-      // Check if returning user
-      const profile = loadProfile(addr);
-      if (profile) {
-        setView('login');
-        setUserRole(profile.role);
-        flash(`Welcome back! Please login.`, 'info');
-      } else {
-        setView('role-select');
-        flash(`Connected: ${addr.substring(0, 8)}...${addr.substring(38)}`, 'success');
-      }
+      // Always defer to role-select
+      setView('role-select');
+      flash(`Connected: ${addr.substring(0, 8)}...${addr.substring(38)}`, 'success');
 
       window.ethereum.on('accountsChanged', (accounts) => {
         if (accounts.length > 0) { window.location.reload(); }
@@ -104,7 +123,7 @@ function App() {
   // ─── Registration ───────────────────────────────────────
   const handleRegister = async (role) => {
     const f = regForm;
-    if (!f.fullName || !f.password) { flash('Please fill all required fields.', 'error'); return; }
+    if (!f.fullName || !f.password || !f.uniqueId) { flash('Please fill all required fields including Unique ID.', 'error'); return; }
     if (f.password !== f.confirmPassword) { flash('Passwords do not match!', 'error'); return; }
     if (f.password.length < 6) { flash('Password must be at least 6 characters.', 'error'); return; }
 
@@ -116,8 +135,7 @@ function App() {
       if (role === 'patient') {
         const tx = await accessContract.selfRegisterAsPatient();
         await tx.wait();
-        // Also register patient in record contract
-        const cid = genCID();
+        const cid = 'Qm' + Array.from(crypto.getRandomValues(new Uint8Array(22))).map(b => b.toString(36)).join('').substring(0, 34);
         const tx2 = await recordContract.registerPatient(cid);
         await tx2.wait();
       } else {
@@ -125,18 +143,18 @@ function App() {
         await tx.wait();
       }
 
-      // Save profile locally
-      const uniqueId = genUniqueID(role);
+      // Save profile to MongoDB
       const pwHash = await hashPassword(f.password);
-      const profile = { ...f, uniqueId, role, passwordHash: pwHash, wallet: account, createdAt: new Date().toISOString() };
-      delete profile.password;
-      delete profile.confirmPassword;
-      saveProfile(account, profile);
+      const payload = { ...f, role, passwordHash: pwHash, wallet: account };
+      delete payload.password;
+      delete payload.confirmPassword;
+      await api('/register', { method: 'POST', body: payload });
 
       setUserRole(role);
+      setRegForm(prev => ({ ...prev, ...payload }));
       setDashTab('profile');
       setView(role === 'patient' ? 'patient-dash' : 'doctor-dash');
-      flash(`✅ Registered! Your Unique ID: ${uniqueId} — save it for login!`, 'success');
+      flash(`✅ Registered successfully!`, 'success');
     } catch (err) {
       flash('Registration failed: ' + (err.reason || err.message || 'Unknown error'), 'error');
     } finally { setLoading(false); }
@@ -144,17 +162,22 @@ function App() {
 
   // ─── Login ──────────────────────────────────────────────
   const handleLogin = async () => {
-    const profile = loadProfile(account);
-    if (!profile) { flash('No account found. Please register first.', 'error'); return; }
-    if (loginForm.uniqueId !== profile.uniqueId) { flash('Invalid Unique ID.', 'error'); return; }
-    const pwHash = await hashPassword(loginForm.password);
-    if (pwHash !== profile.passwordHash) { flash('Incorrect password.', 'error'); return; }
-
-    setUserRole(profile.role);
-    setRegForm(profile);
-    setDashTab('profile');
-    setView(profile.role === 'patient' ? 'patient-dash' : 'doctor-dash');
-    flash(`Welcome back, ${profile.fullName}!`, 'success');
+    try {
+      setLoading(true);
+      const pwHash = await hashPassword(loginForm.password);
+      const data = await api('/login', {
+        method: 'POST',
+        body: { wallet: account, uniqueId: loginForm.uniqueId, passwordHash: pwHash }
+      });
+      const profile = data.profile;
+      setUserRole(profile.role);
+      setRegForm(profile);
+      setDashTab('profile');
+      setView(profile.role === 'patient' ? 'patient-dash' : 'doctor-dash');
+      flash(`Welcome back, ${profile.fullName}!`, 'success');
+    } catch (err) {
+      flash(err.message, 'error');
+    } finally { setLoading(false); }
   };
 
   // ─── Logout ─────────────────────────────────────────────
@@ -185,18 +208,32 @@ function App() {
   };
 
   // ─── Patient: Grant Access ──────────────────────────────
-  const grantAccess = async () => {
-    if (!doctorAddr) { flash('Enter a doctor address.', 'error'); return; }
+  const fetchPendingRequests = async () => {
+    try {
+      const reqs = await api(`/access/requests/${account}`);
+      // Convert docAddr to checksummed for contract calls
+      const enriched = reqs.map(r => {
+        let addr;
+        try { addr = ethers.getAddress(r.docAddr); } catch { addr = r.docAddr; }
+        return { ...r, docAddr: addr };
+      });
+      setPendingRequests(enriched);
+    } catch { setPendingRequests([]); }
+  };
+
+  const approveRequest = async (reqObj) => {
     try {
       setLoading(true);
-      const tx = await recordContract.grantAccess(doctorAddr);
+      const tx = await recordContract.grantAccess(reqObj.docAddr);
       await tx.wait();
-      flash(`✅ Access granted to ${doctorAddr.substring(0, 10)}...`, 'success');
-      setDoctorAddr('');
+      await api('/access/approve', { method: 'POST', body: { requestId: reqObj._id } });
+      flash(`✅ Access granted to ${reqObj.docName}`, 'success');
       await refreshDoctors();
+      await fetchPendingRequests();
     } catch (err) { flash('Grant failed: ' + (err.reason || err.message), 'error'); }
     finally { setLoading(false); }
   };
+
 
   // ─── Patient: Revoke Access ─────────────────────────────
   const revokeAccess = async (doc) => {
@@ -213,8 +250,14 @@ function App() {
   const refreshDoctors = async () => {
     try {
       const docs = await recordContract.getAuthorizedDoctors(account);
+      const seen = new Set();
       const active = [];
-      for (const doc of docs) { if (await recordContract.checkAccess(account, doc)) active.push(doc); }
+      for (const doc of docs) {
+        const addr = doc.toLowerCase();
+        if (seen.has(addr)) continue;
+        seen.add(addr);
+        if (await recordContract.checkAccess(account, doc)) active.push(doc);
+      }
       setAuthorizedDocs(active);
     } catch { setAuthorizedDocs([]); }
   };
@@ -222,30 +265,97 @@ function App() {
   // ─── Patient: Upload Prescription ───────────────────────
   const uploadPrescription = async () => {
     if (!uploadFile) { flash('Select a file first.', 'error'); return; }
+    const secretKey = await askPassword('Enter your password to encrypt this prescription:');
+    if (!secretKey) { flash('Encryption key required.', 'error'); return; }
     try {
       setLoading(true);
       const reader = new FileReader();
       reader.onload = async (e) => {
-        const cid = genCID();
-        saveFile(cid, e.target.result);
-        const tx = await recordContract.addMedicalReport(account, cid, 'Prescription');
-        await tx.wait();
-        flash(`✅ Prescription uploaded! CID: ${cid.substring(0, 16)}...`, 'success');
-        setUploadFile(null);
-        setUploadMeta({ doctorName: '', date: '', medication: '', notes: '' });
-        await fetchMyReports();
+        try {
+          const fileData = { file: e.target.result, meta: uploadMeta };
+          const cid = await encryptAndUpload(fileData, secretKey);
+          const tx = await recordContract.addMedicalReport(account, cid, 'Prescription');
+          await tx.wait();
+          flash(`✅ Prescription uploaded! CID: ${cid.substring(0, 16)}...`, 'success');
+          setUploadFile(null);
+          setUploadMeta({ doctorName: '', date: '', medication: '', notes: '' });
+          await fetchMyReports();
+        } catch (err) {
+          flash('Upload failed: ' + (err.reason || err.message), 'error');
+        } finally {
+          setLoading(false);
+        }
       };
       reader.readAsDataURL(uploadFile);
-    } catch (err) { flash('Upload failed: ' + (err.reason || err.message), 'error'); }
+    } catch (err) { flash('File read failed: ' + (err.reason || err.message), 'error'); setLoading(false); }
+  };
+
+  // ─── View Decrypted Record ──────────────────────────────
+  const handleViewRecord = async (cid) => {
+    const secretKey = await askPassword('Enter the password used to encrypt this record:');
+    if (!secretKey) { flash('Decryption key required.', 'error'); return; }
+    try {
+      setLoading(true);
+      flash('Retrieving and decrypting from IPFS...', 'info');
+      const data = await retrieveAndDecrypt(cid, secretKey);
+      if (data && data.file) {
+        const newWindow = window.open();
+        if (newWindow) {
+          newWindow.document.write(`<iframe src="${data.file}" style="width:100%;height:100%;border:none;margin:0;padding:0;"></iframe>`);
+        } else {
+          flash('Popup blocked. Could not open file.', 'error');
+        }
+        flash('✅ File decrypted and opened in new tab!', 'success');
+      } else if (data && data.meta) {
+        flash(`Decrypted Meta: ${JSON.stringify(data.meta)}`, 'success');
+      } else {
+        flash('Data not found or decryption failed (wrong key?).', 'error');
+      }
+    } catch (err) {
+      flash('Failed to retrieve or decrypt: ' + (err.reason || err.message), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ─── Doctor: Request Access ─────────────────────────────
+  const [requestPatientId, setRequestPatientId] = useState('');
+  const requestAccess = async () => {
+    if (!requestPatientId) { flash('Enter a patient Unique ID.', 'error'); return; }
+    try {
+      setLoading(true);
+      const patientData = await resolveUniqueIdToProfile(requestPatientId);
+      if (!patientData) { flash('Patient not found.', 'error'); return; }
+      const result = await api('/access/request', {
+        method: 'POST',
+        body: { patientAddress: patientData.address, doctorAddress: account }
+      });
+      flash(result.message, 'success');
+      setRequestPatientId('');
+    } catch (err) { flash(err.message, 'error'); }
     finally { setLoading(false); }
   };
 
   // ─── Doctor: View Patient Reports ───────────────────────
   const fetchPatientReports = async () => {
-    if (!searchPatientAddr) { flash('Enter a patient address.', 'error'); return; }
+    if (!searchPatientId) { flash('Enter a patient Unique ID.', 'error'); return; }
     try {
       setLoading(true);
-      const reports = await recordContract.getPatientMedicalReports(searchPatientAddr);
+      const patientData = await resolveUniqueIdToProfile(searchPatientId);
+      if (!patientData) {
+        flash('Patient not found.', 'error');
+        setPatientReports([]);
+        return;
+      }
+
+      const hasAccess = await recordContract.checkAccess(patientData.address, account);
+      if (!hasAccess) {
+        flash('You do not have access to this patient.', 'warning');
+        setPatientReports([{ accessDenied: true, patientAddr: patientData.address, patientName: patientData.fullName }]);
+        return;
+      }
+
+      const reports = await recordContract.getPatientMedicalReports(patientData.address);
       const parsed = reports.map(r => ({
         id: Number(r.id), ipfsHash: r.ipfsHash, uploadedBy: r.uploadedBy,
         timestamp: new Date(Number(r.timestamp) * 1000).toLocaleString(), reportType: r.reportType
@@ -258,25 +368,42 @@ function App() {
 
   // ─── Doctor: Add Report ─────────────────────────────────
   const addDoctorReport = async () => {
-    if (!docReportMeta.patientAddr) { flash('Enter patient address.', 'error'); return; }
+    if (!docReportMeta.patientId) { flash('Enter patient Unique ID.', 'error'); return; }
+    const patientData = await resolveUniqueIdToProfile(docReportMeta.patientId);
+    if (!patientData) { flash('Patient not found.', 'error'); return; }
+
+    try {
+      const hasAccess = await recordContract.checkAccess(patientData.address, account);
+      if (!hasAccess) { flash('You do not have access to add reports for this patient.', 'error'); return; }
+    } catch (err) { }
+
+    const secretKey = await askPassword("Enter patient's password or an agreed encryption key:");
+    if (!secretKey) { flash('Encryption key required.', 'error'); return; }
     try {
       setLoading(true);
-      let cid = genCID();
+      let cid = "";
       if (docReportFile) {
         const b64 = await new Promise((res) => { const r = new FileReader(); r.onload = e => res(e.target.result); r.readAsDataURL(docReportFile); });
-        saveFile(cid, b64);
+        cid = await encryptAndUpload({ file: b64, meta: docReportMeta }, secretKey);
+      } else {
+        cid = await encryptAndUpload({ meta: docReportMeta }, secretKey);
       }
-      const tx = await recordContract.addMedicalReport(docReportMeta.patientAddr, cid, docReportMeta.type);
+      const tx = await recordContract.addMedicalReport(patientData.address, cid, docReportMeta.type);
       await tx.wait();
       flash(`✅ Report submitted!`, 'success');
       setDocReportFile(null);
-      setDocReportMeta({ patientAddr: '', type: 'Blood Test', notes: '' });
+      setDocReportMeta({ patientId: '', type: 'Blood Test', notes: '' });
     } catch (err) { flash('Submit failed: ' + (err.reason || err.message), 'error'); }
     finally { setLoading(false); }
   };
 
   // ─── Profile helper ─────────────────────────────────────
-  const profile = loadProfile(account);
+  const [profile, setProfile] = useState(null);
+  useEffect(() => {
+    if (account && (view === 'patient-dash' || view === 'doctor-dash')) {
+      loadProfileFromAPI(account).then(p => { if (p) setProfile(p); });
+    }
+  }, [account, view]);
   const shortAddr = account ? `${account.substring(0, 6)}...${account.substring(38)}` : '';
 
   // ═══════════════════════════════════════════════════════
@@ -291,6 +418,24 @@ function App() {
       </div>
     </div>
   ) : null;
+
+  const PasswordModal = () => {
+    const [val, setVal] = useState('');
+    if (!pwModal.open) return null;
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+        <div className="glass animate-fade" style={{ padding: 32, maxWidth: 420, width: '90%' }}>
+          <h3 style={{ fontWeight: 700, marginBottom: 16 }}>🔒 {pwModal.title}</h3>
+          <input className="input" type="password" placeholder="••••••••" value={val} onChange={e => setVal(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && val && handlePwSubmit(val)} autoFocus />
+          <div style={{ display: 'flex', gap: 12, marginTop: 20, justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost" onClick={handlePwCancel}>Cancel</button>
+            <button className="btn btn-brand" onClick={() => handlePwSubmit(val)} disabled={!val}>Confirm</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const Navbar = () => (
     <nav className="navbar">
@@ -326,6 +471,7 @@ function App() {
       <div className="orb orb-3" />
       <Navbar />
       <StatusBar />
+      <PasswordModal />
 
       <main style={{ flex: 1, position: 'relative', zIndex: 1 }}>
 
@@ -365,16 +511,38 @@ function App() {
             <p style={{ color: 'var(--text-secondary)', marginBottom: 40 }}>Connected: <span className="mono" style={{ color: 'var(--brand-light)' }}>{shortAddr}</span></p>
             <div className="grid-2">
               {[
-                { role: 'patient', icon: '🏥', title: 'I\'m a Patient', desc: 'Register, manage records, upload prescriptions, control doctor access.', color: 'brand' },
-                { role: 'doctor', icon: '👨‍⚕️', title: 'I\'m a Doctor', desc: 'View patient records, add reports, manage your practice.', color: 'accent' }
+                { role: 'patient', icon: '🏥', title: 'Patient', desc: 'Securely manage your personal medical records and control access.', color: 'brand' },
+                { role: 'doctor', icon: '👨‍⚕️', title: 'Doctor', desc: 'Securely view patient records and submit medical reports.', color: 'accent' }
               ].map(r => (
-                <button key={r.role} className="glass" onClick={() => { setUserRole(r.role); setView(`register-${r.role}`); }}
+                <button key={r.role} className="glass" onClick={() => { setUserRole(r.role); setView('auth-action'); }}
                   style={{ padding: 40, cursor: 'pointer', textAlign: 'left', transition: 'all 0.3s' }}>
                   <div style={{ fontSize: '3rem', marginBottom: 16 }}>{r.icon}</div>
-                  <h3 style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: 8 }}>{r.title}</h3>
+                  <h3 style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: 8 }}>I'm a {r.title}</h3>
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{r.desc}</p>
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* ════════ AUTH ACTION ════════ */}
+        {view === 'auth-action' && (
+          <div className="animate-fade" style={{ maxWidth: 600, margin: '0 auto', padding: '60px 24px', textAlign: 'center' }}>
+            <div style={{ fontSize: '3rem', marginBottom: 16 }}>{userRole === 'patient' ? '🏥' : '👨‍⚕️'}</div>
+            <h2 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: 8, textTransform: 'capitalize' }}>{userRole} Portal</h2>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 40 }}>Would you like to login or register a new account?</p>
+            <div className="grid-2">
+              <button className={`btn btn-${userRole === 'patient' ? 'brand' : 'accent'} btn-lg`} onClick={() => setView('login')} style={{ height: 'auto', padding: '24px 16px' }}>
+                <div style={{ fontSize: '1.5rem', marginBottom: 8 }}>🔑</div>
+                Login
+              </button>
+              <button className="btn btn-ghost btn-lg" onClick={() => { setRegForm({ fullName: '', dob: '', gender: '', bloodType: '', phone: '', email: '', street: '', city: '', state: '', emergencyName: '', emergencyPhone: '', uniqueId: '', password: '', confirmPassword: '', specialization: '', hospital: '', licenseNo: '', experience: '', languages: '' }); setView(`register-${userRole}`); }} style={{ height: 'auto', padding: '24px 16px', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '1.5rem', marginBottom: 8 }}>📝</div>
+                Register
+              </button>
+            </div>
+            <div style={{ marginTop: 40 }}>
+              <button className="btn btn-ghost" onClick={() => setView('role-select')}>Back to Roles</button>
             </div>
           </div>
         )}
@@ -402,7 +570,7 @@ function App() {
               </button>
               <div style={{ textAlign: 'center', marginTop: 16 }}>
                 <button style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem' }}
-                  onClick={() => setView('role-select')}>Don't have an account? Register</button>
+                  onClick={() => setView('auth-action')}>Back</button>
               </div>
             </div>
           </div>
@@ -439,7 +607,7 @@ function App() {
               <div className="divider" />
               <h3 style={{ fontWeight: 700, marginBottom: 16, color: 'var(--brand-light)' }}>Account Credentials</h3>
               <div className="grid-2">
-                <div><label className="label">Unique ID</label><input className="input" value="Auto-generated on registration" disabled style={{ opacity: 0.6 }} /></div>
+                <div><label className="label">Unique ID *</label><input className="input" placeholder="e.g. PAT-123" value={regForm.uniqueId} onChange={e => setRegForm({ ...regForm, uniqueId: e.target.value })} /></div>
                 <div style={{ gridColumn: 'span 2' }}></div>
                 <div><label className="label">Password *</label><input className="input" type="password" placeholder="Min 6 characters" value={regForm.password} onChange={e => setRegForm({ ...regForm, password: e.target.value })} /></div>
                 <div><label className="label">Confirm Password *</label><input className="input" type="password" placeholder="Re-enter password" value={regForm.confirmPassword} onChange={e => setRegForm({ ...regForm, confirmPassword: e.target.value })} /></div>
@@ -448,7 +616,7 @@ function App() {
                 <button className="btn btn-brand btn-lg" onClick={() => handleRegister('patient')} disabled={loading}>
                   {loading ? <><span className="spinner" /> Registering...</> : '📝 Register as Patient'}
                 </button>
-                <button className="btn btn-ghost" onClick={() => setView('role-select')}>Back</button>
+                <button className="btn btn-ghost" onClick={() => setView('auth-action')}>Back</button>
               </div>
             </div>
           </div>
@@ -479,7 +647,7 @@ function App() {
               <div className="divider" />
               <h3 style={{ fontWeight: 700, marginBottom: 16, color: 'var(--accent-light)' }}>Account Credentials</h3>
               <div className="grid-2">
-                <div><label className="label">Unique ID</label><input className="input" value="Auto-generated on registration" disabled style={{ opacity: 0.6 }} /></div>
+                <div><label className="label">Unique ID *</label><input className="input" placeholder="e.g. DOC-123" value={regForm.uniqueId} onChange={e => setRegForm({ ...regForm, uniqueId: e.target.value })} /></div>
                 <div style={{ gridColumn: 'span 2' }}></div>
                 <div><label className="label">Password *</label><input className="input" type="password" placeholder="Min 6 characters" value={regForm.password} onChange={e => setRegForm({ ...regForm, password: e.target.value })} /></div>
                 <div><label className="label">Confirm Password *</label><input className="input" type="password" placeholder="Re-enter password" value={regForm.confirmPassword} onChange={e => setRegForm({ ...regForm, confirmPassword: e.target.value })} /></div>
@@ -488,7 +656,7 @@ function App() {
                 <button className="btn btn-accent btn-lg" onClick={() => handleRegister('doctor')} disabled={loading}>
                   {loading ? <><span className="spinner" /> Registering...</> : '📝 Register as Doctor'}
                 </button>
-                <button className="btn btn-ghost" onClick={() => setView('role-select')}>Back</button>
+                <button className="btn btn-ghost" onClick={() => setView('auth-action')}>Back</button>
               </div>
             </div>
           </div>
@@ -506,7 +674,7 @@ function App() {
             </div>
             <div className="tabs" style={{ marginBottom: 24 }}>
               {['profile', 'upload', 'records', 'access'].map(t => (
-                <button key={t} className={`tab ${dashTab === t ? 'tab-active' : ''}`} onClick={() => { setDashTab(t); if (t === 'records') fetchMyReports(); if (t === 'access') refreshDoctors(); }}>
+                <button key={t} className={`tab ${dashTab === t ? 'tab-active' : ''}`} onClick={() => { setDashTab(t); if (t === 'records') fetchMyReports(); if (t === 'access') { refreshDoctors(); fetchPendingRequests(); } }}>
                   {{ profile: '👤 Profile', upload: '📤 Upload Rx', records: '📋 Records', access: '🔐 Access' }[t]}
                 </button>
               ))}
@@ -577,7 +745,10 @@ function App() {
                           <span style={{ color: 'var(--text-faint)', fontSize: '0.8rem' }}>{r.timestamp}</span>
                         </div>
                         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 8 }} className="mono truncate">CID: {r.ipfsHash}</p>
-                        <p style={{ fontSize: '0.78rem', color: 'var(--text-faint)', marginTop: 4 }}>By: {r.uploadedBy}</p>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                          <p style={{ fontSize: '0.78rem', color: 'var(--text-faint)' }}>By: {r.uploadedBy}</p>
+                          <button className="btn btn-ghost btn-sm" onClick={() => handleViewRecord(r.ipfsHash)}>👁️ View Record</button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -589,16 +760,35 @@ function App() {
             {dashTab === 'access' && (
               <div className="glass" style={{ padding: 32 }}>
                 <h3 style={{ fontWeight: 700, marginBottom: 20, color: 'var(--brand-light)' }}>Manage Doctor Access</h3>
-                <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-                  <input className="input" placeholder="Enter doctor's wallet address (0x...)" value={doctorAddr} onChange={e => setDoctorAddr(e.target.value)} />
-                  <button className="btn btn-brand" onClick={grantAccess} disabled={loading} style={{ whiteSpace: 'nowrap' }}>✅ Grant</button>
-                </div>
-                <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', marginBottom: 12 }}>Authorized Doctors</h4>
+
+                {/* Pending Requests */}
+                <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', marginBottom: 12 }}>🔔 Pending Requests</h4>
+                {pendingRequests.length === 0 ? (
+                  <p style={{ color: 'var(--text-faint)', fontSize: '0.9rem', marginBottom: 24, padding: '20px', background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>No pending access requests from doctors.</p>
+                ) : (
+                  <div style={{ marginBottom: 24 }}>
+                    {pendingRequests.map((req, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,165,0,0.1)', borderRadius: 'var(--radius-md)', padding: '16px 20px', border: '1px solid var(--accent)', marginBottom: 8 }}>
+                        <div>
+                          <p style={{ fontWeight: 600 }}>{req.docName}</p>
+                          <p className="mono" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{req.docId || 'Unknown ID'} • {req.docAddr.substring(0, 10)}...</p>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button className="btn btn-brand btn-sm" onClick={() => approveRequest(req)} disabled={loading}>✅ Approve</button>
+                          <button className="btn btn-danger btn-sm" onClick={async () => { try { await api('/access/reject', { method: 'POST', body: { requestId: req._id } }); await fetchPendingRequests(); flash('Request rejected.', 'info'); } catch (err) { flash('Reject failed', 'error'); } }}>❌ Reject</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Active Access */}
+                <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', marginBottom: 12 }}>Active Access</h4>
                 {authorizedDocs.length === 0 ? (
-                  <p style={{ color: 'var(--text-faint)', fontSize: '0.9rem' }}>No doctors authorized yet.</p>
+                  <p style={{ color: 'var(--text-faint)', fontSize: '0.9rem' }}>No doctors currently authorized.</p>
                 ) : authorizedDocs.map((doc, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '12px 16px', border: '1px solid var(--border)', marginBottom: 8 }}>
-                    <span className="mono" style={{ fontSize: '0.88rem', color: 'var(--text-secondary)' }}>{doc}</span>
+                    <span className="mono" style={{ fontSize: '0.88rem', color: 'var(--text-secondary)' }}>{doc.substring(0, 10)}...</span>
                     <button className="btn btn-danger btn-sm" onClick={() => revokeAccess(doc)}>Revoke</button>
                   </div>
                 ))}
@@ -621,9 +811,9 @@ function App() {
               </div>
             </div>
             <div className="tabs" style={{ marginBottom: 24 }}>
-              {['profile', 'search', 'add-report'].map(t => (
+              {['profile', 'request-access', 'search', 'add-report'].map(t => (
                 <button key={t} className={`tab tab-accent ${dashTab === t ? 'tab-active' : ''}`} onClick={() => setDashTab(t)}>
-                  {{ profile: '👤 Profile', search: '🔍 Search Patient', 'add-report': '📄 Add Report' }[t]}
+                  {{ profile: '👤 Profile', 'request-access': '🔓 Request Access', search: '🔍 Search Patient', 'add-report': '📄 Add Report' }[t]}
                 </button>
               ))}
             </div>
@@ -644,15 +834,41 @@ function App() {
               </div>
             )}
 
+            {/* Request Access Tab */}
+            {dashTab === 'request-access' && (
+              <div className="glass" style={{ padding: 32 }}>
+                <h3 style={{ fontWeight: 700, marginBottom: 8, color: 'var(--accent-light)' }}>Request Patient Access</h3>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 24, fontSize: '0.9rem' }}>Enter the patient's Unique ID to send an access request. They will need to approve it from their dashboard.</p>
+                <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+                  <input className="input" placeholder="Enter patient Unique ID" value={requestPatientId} onChange={e => setRequestPatientId(e.target.value)} />
+                  <button className="btn btn-brand" onClick={requestAccess} disabled={loading} style={{ whiteSpace: 'nowrap' }}>🔓 Request Access</button>
+                </div>
+                <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: 20, border: '1px solid var(--border)' }}>
+                  <p style={{ color: 'var(--text-faint)', fontSize: '0.85rem' }}>💡 <strong>How it works:</strong></p>
+                  <ol style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 8, paddingLeft: 20, lineHeight: 1.8 }}>
+                    <li>Enter the patient's Unique ID and click "Request Access"</li>
+                    <li>The patient will see your request in their <strong>Access</strong> tab</li>
+                    <li>Once they click <strong>Approve</strong>, you can search and view their records</li>
+                  </ol>
+                </div>
+              </div>
+            )}
+
             {/* Search Patient */}
             {dashTab === 'search' && (
               <div className="glass" style={{ padding: 32 }}>
                 <h3 style={{ fontWeight: 700, marginBottom: 20, color: 'var(--accent-light)' }}>Search Patient Records</h3>
                 <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-                  <input className="input" placeholder="Enter patient's wallet address (0x...)" value={searchPatientAddr} onChange={e => setSearchPatientAddr(e.target.value)} />
+                  <input className="input" placeholder="Enter patient's Unique ID (PAT-XXXXXX)" value={searchPatientId} onChange={e => setSearchPatientId(e.target.value)} />
                   <button className="btn btn-accent" onClick={fetchPatientReports} disabled={loading} style={{ whiteSpace: 'nowrap' }}>🔍 Search</button>
                 </div>
-                {patientReports.length > 0 && (
+                {patientReports.length === 1 && patientReports[0].accessDenied ? (
+                  <div style={{ textAlign: 'center', padding: 40, background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '3rem', marginBottom: 16 }}>🔒</div>
+                    <h3 style={{ fontWeight: 700, marginBottom: 8 }}>Access Required</h3>
+                    <p style={{ color: 'var(--text-secondary)', marginBottom: 20 }}>You do not have permission to view {patientReports[0].patientName}'s records. Go to the <strong>Request Access</strong> tab to send a request.</p>
+                  </div>
+                ) : patientReports.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {patientReports.map((r, i) => (
                       <div key={i} style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '16px 20px', border: '1px solid var(--border)' }}>
@@ -664,6 +880,9 @@ function App() {
                           <span style={{ color: 'var(--text-faint)', fontSize: '0.8rem' }}>{r.timestamp}</span>
                         </div>
                         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 8 }} className="mono truncate">CID: {r.ipfsHash}</p>
+                        <div style={{ marginTop: 8, textAlign: 'right' }}>
+                          <button className="btn btn-ghost btn-sm" style={{ color: 'var(--accent)' }} onClick={() => handleViewRecord(r.ipfsHash)}>👁️ View Record</button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -675,7 +894,7 @@ function App() {
             {dashTab === 'add-report' && (
               <div className="glass" style={{ padding: 32 }}>
                 <h3 style={{ fontWeight: 700, marginBottom: 20, color: 'var(--accent-light)' }}>Add Medical Report</h3>
-                <div style={{ marginBottom: 16 }}><label className="label">Patient Address *</label><input className="input" placeholder="0x..." value={docReportMeta.patientAddr} onChange={e => setDocReportMeta({ ...docReportMeta, patientAddr: e.target.value })} /></div>
+                <div style={{ marginBottom: 16 }}><label className="label">Patient Unique ID *</label><input className="input" placeholder="PAT-XXXXXX" value={docReportMeta.patientId} onChange={e => setDocReportMeta({ ...docReportMeta, patientId: e.target.value })} /></div>
                 <div className="grid-2">
                   <div><label className="label">Report Type</label><select className="input" value={docReportMeta.type} onChange={e => setDocReportMeta({ ...docReportMeta, type: e.target.value })}><option>Blood Test</option><option>MRI Scan</option><option>X-Ray</option><option>CT Scan</option><option>Ultrasound</option><option>ECG</option><option>Prescription</option><option>Consultancy Report</option></select></div>
                   <div><label className="label">Notes</label><input className="input" placeholder="Brief notes..." value={docReportMeta.notes} onChange={e => setDocReportMeta({ ...docReportMeta, notes: e.target.value })} /></div>

@@ -36,5 +36,4 @@ Thumbs.db
 *.sln
 *.sw?
 
-# Faculty Docs (Ignored intentionally)
-docs/Faculty_Presentation.md
+

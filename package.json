@@ -8,17 +8,23 @@
     "test": "npx hardhat test",
     "deploy": "npx hardhat run scripts/deploy.js --network localhost"
   },
-  "keywords": ["ethereum", "blockchain", "health-records", "ipfs", "solidity"],
+  "keywords": [
+    "ethereum",
+    "blockchain",
+    "health-records",
+    "ipfs",
+    "solidity"
+  ],
   "author": "EthSecure Health Team",
   "license": "MIT",
   "devDependencies": {
-    "@nomicfoundation/hardhat-ethers": "^4.0.6",
-    "@nomicfoundation/hardhat-toolbox": "^7.0.0",
+    "@nomicfoundation/hardhat-ethers": "^3.1.3",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@openzeppelin/contracts": "^5.6.1",
-    "chai": "^6.2.2",
+    "chai": "^4.5.0",
     "ethers": "^6.16.0",
     "ganache": "^7.9.2",
-    "hardhat": "^3.2.0"
+    "hardhat": "^2.28.6"
   },
   "type": "module"
 }

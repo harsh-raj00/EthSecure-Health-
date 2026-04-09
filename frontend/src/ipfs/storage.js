@@ -14,9 +14,9 @@ import CryptoJS from 'crypto-js';
 import axios from 'axios';
 
 // ─── Configuration ──────────────────────────────────────────────
-// Replace with your Pinata API keys from https://app.pinata.cloud
-const PINATA_API_KEY     = "YOUR_PINATA_API_KEY";
-const PINATA_SECRET_KEY  = "YOUR_PINATA_SECRET_KEY";
+// Pulling Pinata API keys from environment variables (created via .env file)
+const PINATA_API_KEY     = import.meta.env.VITE_PINATA_API_KEY || "YOUR_PINATA_API_KEY";
+const PINATA_SECRET_KEY  = import.meta.env.VITE_PINATA_SECRET_KEY || "YOUR_PINATA_SECRET_KEY";
 const PINATA_UPLOAD_URL  = "https://api.pinata.cloud/pinning/pinFileToIPFS";
 const IPFS_GATEWAY_URL   = "https://gateway.pinata.cloud/ipfs";
 

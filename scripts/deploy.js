@@ -11,15 +11,8 @@ import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 
 async function main() {
-  // ─── Connect to local Ganache via Hardhat v3 ─────────────────────
-  const connection = await hardhat.network.connect();
-  const accounts = await connection.provider.request({ method: "eth_accounts" });
-
-  // Create a standard ethers provider + signers
-  const provider = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
-  const deployer = await provider.getSigner(accounts[0]);
-  const doctor   = await provider.getSigner(accounts[1]);
-  const patient  = await provider.getSigner(accounts[2]);
+  // ─── Get Signers ───────────────────────────────────────────────
+  const [deployer, doctor, patient, diagnostic] = await hardhat.ethers.getSigners();
 
   console.log("");
   console.log("  EthSecure Health - Deployment");
@@ -52,7 +45,6 @@ async function main() {
 
   // ─── Step 3: Setup Demo Roles ────────────────────────────────────
   console.log("  [3/6] Setting up demo roles...");
-  const diagnostic = await provider.getSigner(accounts[3]);
   await accessControl.addDoctor(doctor.address);
   console.log(`        Doctor      : ${doctor.address}`);
   await accessControl.addPatient(patient.address);
@@ -160,7 +152,6 @@ async function main() {
   console.log("  Next: Add these Ganache accounts to MetaMask");
   console.log("  using their private keys from the Ganache terminal.");
   
-  await connection.close();
 }
 
 main().catch((error) => {

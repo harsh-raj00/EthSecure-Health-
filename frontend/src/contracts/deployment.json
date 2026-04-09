@@ -1,14 +1,14 @@
 {
   "network": "localhost",
   "contracts": {
-    "EthSecureHealthAccess": "0xD833215cBcc3f914bD1C9ece3EE7BF8B14f841bb",
-    "EthSecureRecord": "0x9561C133DD8580860B6b7E504bC5Aa500f0f06a7"
+    "EthSecureHealthAccess": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "EthSecureRecord": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
   },
   "roles": {
-    "admin": "0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1",
-    "doctor": "0xFFcf8FDEE72ac11b5c542428B35EEF5769C409f0",
-    "patient": "0x22d491Bde2303f2f43325b2108D26f1eAbA1e32b",
-    "diagnostic": "0xE11BA2b4D45Eaed5996Cd0823791E0C93114882d"
+    "admin": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "doctor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    "patient": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    "diagnostic": "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
   },
   "demoData": {
     "patientName": "John Doe (Demo)",
@@ -16,5 +16,5 @@
     "bloodType": "O+",
     "preloadedReports": 3
   },
-  "deployedAt": "2026-03-28T17:11:28.296Z"
+  "deployedAt": "2026-04-09T08:38:54.011Z"
 }
